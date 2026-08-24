@@ -1,0 +1,38 @@
+const { contextBridge, ipcRenderer } = require('electron');
+contextBridge.exposeInMainWorld('musicBar', {
+  load: url => ipcRenderer.invoke('player:load', url),
+  toggle: () => ipcRenderer.invoke('player:toggle'),
+  seek: time => ipcRenderer.invoke('player:seek', time),
+  skip: delta => ipcRenderer.invoke('player:skip', delta),
+  volume: value => ipcRenderer.invoke('player:volume', value),
+  mute: () => ipcRenderer.invoke('player:mute'),
+  output: {
+    list: () => ipcRenderer.invoke('output:list'),
+    select: (deviceId, label) => ipcRenderer.invoke('output:select', deviceId, label),
+  },
+  room: {
+    create: () => ipcRenderer.invoke('room:create'),
+    join: invite => ipcRenderer.invoke('room:join', invite),
+    leave: () => ipcRenderer.invoke('room:leave'),
+    operate: (type, payload = {}) => ipcRenderer.invoke('room:operate', type, payload),
+    getState: () => ipcRenderer.invoke('room:get-state'),
+    copy: text => ipcRenderer.invoke('clipboard:write', text),
+    onState: callback => ipcRenderer.on('room:state', (_event, state) => callback(state)),
+    onStatus: callback => ipcRenderer.on('room:status', (_event, status) => callback(status)),
+  },
+  setHeight: height => ipcRenderer.send('window:height', height),
+  alwaysOnTop: enabled => ipcRenderer.send('window:top', enabled),
+  minimize: () => ipcRenderer.send('window:minimize'),
+  close: () => ipcRenderer.send('window:close'),
+  openSource: () => ipcRenderer.send('source:open'),
+  requestState: () => ipcRenderer.send('state:request'),
+  onState: callback => ipcRenderer.on('player:state', (_event, state) => callback(state)),
+  history: {
+    list: () => ipcRenderer.invoke('history:list'),
+    update: (id, changes) => ipcRenderer.invoke('history:update', id, changes),
+    delete: id => ipcRenderer.invoke('history:delete', id),
+    import: () => ipcRenderer.invoke('history:import'),
+    export: () => ipcRenderer.invoke('history:export'),
+    onChanged: callback => ipcRenderer.on('history:changed', (_event, items) => callback(items)),
+  },
+});

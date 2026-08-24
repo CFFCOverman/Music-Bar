@@ -1,0 +1,43 @@
+name: Windows clean install
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-install:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install from lockfile
+        run: npm ci
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Protocol tests
+        run: npm test
+
+      - name: Package Windows portable app
+        run: npm run desktop:pack
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@v7
+        with:
+          name: Shengjian-Music-Bar-Windows
+          path: release/*.exe
+          retention-days: 14

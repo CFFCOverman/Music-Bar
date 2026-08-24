@@ -1,39 +1,68 @@
 {
-  "name": "sites-project",
-  "version": "0.1.0",
+  "name": "shengjian-music-bar",
+  "version": "0.5.0",
+  "description": "A compact desktop music bar with encrypted host-powered internet listening rooms.",
+  "author": "Pinyo",
   "private": true,
+  "main": "src/main/index.cjs",
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vinext dev",
-    "build": "vinext build",
-    "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "postinstall": "node scripts/setup-cloudflared.cjs",
+    "setup:tunnel": "node scripts/setup-cloudflared.cjs",
+    "check": "node scripts/check.cjs",
+    "test": "node --test test/room.test.cjs test/tunnel-binary.test.cjs",
+    "desktop": "electron src/main/index.cjs",
+    "desktop:pack": "electron-builder --win portable"
   },
   "dependencies": {
-    "next": "16.2.6",
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
-    "@cloudflare/workers-types": "4.20260515.1",
-    "@openai/sites-vite-plugin": "^0.1.0 || ^0.2.0",
-    "@tailwindcss/postcss": "4.2.1",
-    "@types/node": "22.19.19",
-    "@types/react": "19.2.14",
-    "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.26",
-    "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
-    "react-server-dom-webpack": "19.2.6",
-    "tailwindcss": "4.2.1",
-    "typescript": "5.9.3",
-    "vinext": "1.0.0-beta.3",
-    "vite": "8.0.13",
-    "wrangler": "4.92.0"
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3"
   },
-  "type": "module"
+  "overrides": {
+    "@electron/get": {
+      "undici": "7.29.0"
+    }
+  },
+  "type": "module",
+  "build": {
+    "appId": "com.shengjian.musicbar",
+    "productName": "声笺 Music Bar",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/cloudflared.exe",
+        "to": "cloudflared.exe"
+      },
+      {
+        "from": "vendor/cloudflared-LICENSE.txt",
+        "to": "cloudflared-LICENSE.txt"
+      },
+      {
+        "from": "vendor/NOTICE.md",
+        "to": "cloudflared-NOTICE.md"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Shengjian-Music-Bar-${version}.exe"
+    }
+  }
 }

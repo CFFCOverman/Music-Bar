@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>声笺 Music Bar</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <main class="shell" id="shell">
+    <section class="bar" aria-label="音乐播放器">
+      <div class="cover drag" id="cover" aria-hidden="true">
+        <span id="bars"><i></i><i></i><i></i></span>
+      </div>
+
+      <div class="meta drag">
+        <strong id="title">还没有播放</strong>
+        <span id="artist">粘贴一个网页链接开始</span>
+      </div>
+
+      <div class="transport" aria-label="播放控制">
+        <button class="icon skip" data-skip="-10" type="button" title="后退 10 秒" aria-label="后退 10 秒">↶</button>
+        <button class="play" id="play" type="button" title="播放 / 暂停" aria-label="播放或暂停">▶</button>
+        <button class="icon skip" data-skip="10" type="button" title="前进 10 秒" aria-label="前进 10 秒">↷</button>
+      </div>
+
+      <div class="time">
+        <span id="elapsed">0:00</span>
+        <input id="progress" type="range" min="0" max="1000" value="0" aria-label="播放进度">
+        <span id="duration">0:00</span>
+      </div>
+
+      <div class="sound" aria-label="音量控制">
+        <button class="icon" id="mute" type="button" title="静音" aria-label="静音">♪</button>
+        <input class="volume" id="volume" type="range" min="0" max="1" step="0.02" value="1" aria-label="音量">
+        <button class="icon output-toggle" id="outputToggle" type="button" title="选择音频输出" aria-label="选择音频输出设备" aria-expanded="false" aria-controls="outputPanel">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6h4l5 4V5L9 9H5zM17 9.2a4 4 0 0 1 0 5.6M19.5 7a7 7 0 0 1 0 10"/></svg>
+        </button>
+      </div>
+
+      <div class="utility" aria-label="播放器选项">
+        <button class="icon room-toggle" id="roomToggle" type="button" title="一起听" aria-label="打开一起听房间" aria-expanded="false" aria-controls="roomPanel">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 12a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5zM15.8 11a2.6 2.6 0 1 0 0-5.2M3.5 18.5c.5-3 2.2-4.6 5-4.6s4.5 1.6 5 4.6M14.2 13.7c3.5-.4 5.5 1.2 5.9 4.2"/></svg>
+        </button>
+        <button class="icon history-toggle" id="historyToggle" type="button" title="播放历史" aria-label="打开播放历史" aria-expanded="false" aria-controls="historyPanel">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.7 9a8.5 8.5 0 1 1 .6 7.2M3.7 9V4.8M3.7 9h4.2M12 7.4v5l3 1.8"/></svg>
+        </button>
+        <button class="icon add" id="add" type="button" title="添加网页链接" aria-label="添加网页链接">＋</button>
+        <button class="icon pin active" id="pin" type="button" title="取消置顶" aria-label="切换窗口置顶">◆</button>
+        <span class="window-divider" aria-hidden="true"></span>
+        <button class="window" id="min" type="button" title="最小化" aria-label="最小化">—</button>
+        <button class="window close" id="close" type="button" title="退出" aria-label="退出">×</button>
+      </div>
+    </section>
+
+    <form class="link-row" id="form">
+      <label class="sr-only" for="url">网页或音频链接</label>
+      <input id="url" autocomplete="off" spellcheck="false" placeholder="粘贴 Bilibili 链接、BV 号或音视频网页…">
+      <button type="button" id="source">原网页 ↗</button>
+      <button type="submit">载入</button>
+    </form>
+
+    <aside class="output-panel" id="outputPanel" aria-label="音频输出设备" aria-hidden="true">
+      <header class="output-header">
+        <div>
+          <strong>音频输出</strong>
+          <span>选择扬声器、耳机或蓝牙设备</span>
+        </div>
+        <button id="refreshOutputs" type="button">刷新设备</button>
+      </header>
+      <div class="output-list" id="outputList"></div>
+      <div class="output-empty" id="outputEmpty">
+        <span aria-hidden="true">◖</span>
+        <strong>请先载入一个网页</strong>
+        <small>播放开始后即可选择音频输出</small>
+      </div>
+    </aside>
+
+    <aside class="room-panel" id="roomPanel" aria-label="一起听房间" aria-hidden="true">
+      <header class="room-header">
+        <div>
+          <strong>一起听</strong>
+          <span id="roomStatusText">通过互联网连接房主电脑</span>
+        </div>
+        <button id="leaveRoom" type="button" hidden>离开房间</button>
+      </header>
+
+      <div class="room-setup" id="roomSetup">
+        <section class="room-create-card">
+          <strong>创建互联网房间</strong>
+          <span>自动建立临时加密隧道，无需同一 Wi-Fi、服务器或端口转发。免费服务偶尔断开时，重新创建房间即可。</span>
+          <button id="createRoom" type="button">创建互联网房间</button>
+        </section>
+        <div class="room-divider"><span>或者</span></div>
+        <form class="room-join" id="joinRoomForm">
+          <label for="roomInviteInput">加入朋友的房间</label>
+          <textarea id="roomInviteInput" rows="2" spellcheck="false" placeholder="粘贴 MB1. 开头的邀请内容"></textarea>
+          <button type="submit">加入房间</button>
+        </form>
+      </div>
+
+      <div class="room-active" id="roomActive" hidden>
+        <div class="room-session">
+          <div><span class="room-dot"></span><strong id="roomRole">房主</strong><small id="roomPeer">等待朋友加入</small></div>
+          <button id="copyInvite" type="button">复制邀请</button>
+        </div>
+        <textarea class="room-invite" id="roomInvite" rows="2" readonly aria-label="房间邀请内容"></textarea>
+        <small class="room-secret">邀请相当于房间密码，只发给你要一起听的人。</small>
+        <form class="room-add" id="roomAddForm">
+          <input id="roomUrl" placeholder="添加 Bilibili、BV 号或音视频网页…" autocomplete="off" spellcheck="false">
+          <button type="submit">加入歌单</button>
+        </form>
+        <div class="room-playback">
+          <button id="roomPrevious" type="button">← 上一首</button>
+          <span id="roomNowPlaying">歌单暂时为空</span>
+          <button id="roomNext" type="button">下一首 →</button>
+        </div>
+        <div class="room-playlist" id="roomPlaylist"></div>
+        <div class="room-empty" id="roomEmpty"><strong>共同歌单为空</strong><span>双方都可以添加、编辑、排序和删除</span></div>
+      </div>
+    </aside>
+
+    <aside class="history-panel" id="historyPanel" aria-label="播放历史" aria-hidden="true">
+      <header class="history-header">
+        <div>
+          <strong>播放历史</strong>
+          <span>保存过的网页与音频</span>
+        </div>
+        <div class="history-tools">
+          <button id="importHistory" type="button">导入</button>
+          <button id="exportHistory" type="button">导出</button>
+        </div>
+      </header>
+      <div class="history-list" id="historyList"></div>
+      <div class="history-empty" id="historyEmpty">
+        <span aria-hidden="true">♫</span>
+        <strong>还没有播放记录</strong>
+        <small>添加网页后会自动保存在这里</small>
+      </div>
+    </aside>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

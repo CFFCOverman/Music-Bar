@@ -1,38 +1,40 @@
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/.vinext/
+# Dependencies and generated builds
+/node_modules/
+/release/
+/coverage/
+/dist/
 /out/
 
-# misc
-.DS_Store
-*.pem
+# Downloaded third-party runtime (restored by npm ci)
+/vendor/cloudflared.exe
+/vendor/*.download-*
 
-# debug
+# Fresh-install test workspaces
+/.fresh-install-test/
+
+# Local settings and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and package-manager noise
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# local environment
-.env*
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
 
-# deployment and generated files
-.vercel
-next-env.d.ts
-/dist/
+# Previous web-hosting artifacts
+/.next/
+/.vinext/
+/.vercel/
 /.wrangler/
-/outputs/
-/work/
+/site-build.tar.gz
