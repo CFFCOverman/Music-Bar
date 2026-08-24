@@ -95,14 +95,14 @@ class MediaController {
     this.applyPreferredOutput();
   }
 
-  toggle() { return this.action(`if (media) { if (media.paused) media.play().catch(() => {}); else media.pause(); }`); }
-  seek(time) { return this.action(`if (media) media.currentTime = Math.max(0, Math.min(media.duration || 0, ${Number(time) || 0}));`); }
-  skip(delta) { return this.action(`if (media) media.currentTime = Math.max(0, Math.min(media.duration || 0, media.currentTime + ${Number(delta) || 0}));`); }
+  toggle() { this.cancelSyncPlayback(); return this.action(`if (media) { if (media.paused) media.play().catch(() => {}); else media.pause(); }`); }
+  seek(time) { this.cancelSyncPlayback(); return this.action(`if (media) media.currentTime = Math.max(0, Math.min(media.duration || 0, ${Number(time) || 0}));`); }
+  skip(delta) { this.cancelSyncPlayback(); return this.action(`if (media) media.currentTime = Math.max(0, Math.min(media.duration || 0, media.currentTime + ${Number(delta) || 0}));`); }
   volume(value) { return this.action(`if (media) { media.volume = ${Math.max(0, Math.min(1, Number(value) || 0))}; media.muted = false; }`); }
   mute() { return this.action(`if (media) media.muted = !media.muted;`); }
 
   syncPlayback({ position = 0, playing = false }) {
-    this.syncTimers.forEach(clearTimeout);
+    this.cancelSyncPlayback();
     const code = `if (media) {
       media.currentTime = Math.max(0, Math.min(media.duration || ${Number(position) || 0}, ${Number(position) || 0}));
       if (${Boolean(playing)}) media.play().catch(() => {}); else media.pause();
@@ -110,6 +110,11 @@ class MediaController {
     const apply = () => this.action(code);
     apply();
     this.syncTimers = [650, 1600, 3200].map(delay => setTimeout(apply, delay));
+  }
+
+  cancelSyncPlayback() {
+    this.syncTimers.forEach(clearTimeout);
+    this.syncTimers = [];
   }
 
   getCurrentUrl() { return this.window?.webContents.getURL() || ''; }
@@ -187,7 +192,7 @@ class MediaController {
   dispose() {
     this.stopPolling();
     this.outputRetryTimers.forEach(clearTimeout);
-    this.syncTimers.forEach(clearTimeout);
+    this.cancelSyncPlayback();
   }
 }
 

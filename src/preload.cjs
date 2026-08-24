@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('musicBar', {
   },
   room: {
     create: () => ipcRenderer.invoke('room:create'),
+    createFromPlaylist: playlistId => ipcRenderer.invoke('room:create-from-playlist', playlistId),
     join: invite => ipcRenderer.invoke('room:join', invite),
     leave: () => ipcRenderer.invoke('room:leave'),
     operate: (type, payload = {}) => ipcRenderer.invoke('room:operate', type, payload),
@@ -34,5 +35,18 @@ contextBridge.exposeInMainWorld('musicBar', {
     import: () => ipcRenderer.invoke('history:import'),
     export: () => ipcRenderer.invoke('history:export'),
     onChanged: callback => ipcRenderer.on('history:changed', (_event, items) => callback(items)),
+  },
+  playlists: {
+    list: () => ipcRenderer.invoke('playlists:list'),
+    create: name => ipcRenderer.invoke('playlists:create', name),
+    rename: (id, name) => ipcRenderer.invoke('playlists:rename', id, name),
+    delete: id => ipcRenderer.invoke('playlists:delete', id),
+    addHistory: (playlistId, historyId) => ipcRenderer.invoke('playlists:add-history', playlistId, historyId),
+    updateItem: (playlistId, itemId, changes) => ipcRenderer.invoke('playlists:update-item', playlistId, itemId, changes),
+    removeItem: (playlistId, itemId) => ipcRenderer.invoke('playlists:remove-item', playlistId, itemId),
+    reorderItem: (playlistId, itemId, index) => ipcRenderer.invoke('playlists:reorder-item', playlistId, itemId, index),
+    import: () => ipcRenderer.invoke('playlists:import'),
+    export: playlistId => ipcRenderer.invoke('playlists:export', playlistId),
+    onChanged: callback => ipcRenderer.on('playlists:changed', (_event, items) => callback(items)),
   },
 });

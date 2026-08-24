@@ -502,7 +502,7 @@ function currentPosition(playback, now) {
 }
 
 function ensureStateFits(state) {
-  const plaintextSize = Buffer.byteLength(JSON.stringify({ type: 'welcome', role: 'guest', state }), 'utf8');
+  const plaintextSize = Buffer.byteLength(JSON.stringify({ type: 'welcome', role: 'guest', state, serverTime: Date.now() }), 'utf8');
   if (plaintextSize > MAX_SECURE_PLAINTEXT) throw new ProtocolError('state_too_large', '房间歌单数据已达到安全消息上限');
 }
 
@@ -781,7 +781,7 @@ class RoomHost {
       pending.serverNonce.fill(0);
       this._pending.delete(socket);
       this._guest = socket;
-      if (!safeSendSecure(socket, this.roomId, { type: 'welcome', role: 'guest', state: this._state })) {
+      if (!safeSendSecure(socket, this.roomId, { type: 'welcome', role: 'guest', state: this._state, serverTime: Date.now() })) {
         return safeClose(socket, 1011, 'welcome failed');
       }
       safeCallback(this._onStatus, { status: 'guest-connected' });
@@ -842,7 +842,7 @@ class RoomHost {
   }
 
   _broadcastState() {
-    if (this._guest) safeSendSecure(this._guest, this.roomId, { type: 'state', state: this._state });
+    if (this._guest) safeSendSecure(this._guest, this.roomId, { type: 'state', state: this._state, serverTime: Date.now() });
   }
 
   _heartbeatGuest() {
@@ -899,14 +899,16 @@ class RoomHost {
 function validateServerMessage(message, roomId) {
   if (!isPlainObject(message) || typeof message.type !== 'string') throw new ProtocolError('invalid_message', '服务器消息格式无效');
   if (message.type === 'welcome') {
-    if (!hasOnlyKeys(message, ['type', 'role', 'state'], ['type', 'role', 'state']) || message.role !== 'guest') {
+    if (!hasOnlyKeys(message, ['type', 'role', 'state', 'serverTime'], ['type', 'role', 'state', 'serverTime']) ||
+        message.role !== 'guest' || !isFiniteNumber(message.serverTime, 0, Number.MAX_SAFE_INTEGER)) {
       throw new ProtocolError('invalid_message', '欢迎消息格式无效');
     }
-    return { type: message.type, role: message.role, state: validateState(message.state, roomId) };
+    return { type: message.type, role: message.role, state: validateState(message.state, roomId), serverTime: message.serverTime };
   }
   if (message.type === 'state') {
-    if (!hasOnlyKeys(message, ['type', 'state'], ['type', 'state'])) throw new ProtocolError('invalid_message', '状态消息格式无效');
-    return { type: message.type, state: validateState(message.state, roomId) };
+    if (!hasOnlyKeys(message, ['type', 'state', 'serverTime'], ['type', 'state', 'serverTime']) ||
+        !isFiniteNumber(message.serverTime, 0, Number.MAX_SAFE_INTEGER)) throw new ProtocolError('invalid_message', '状态消息格式无效');
+    return { type: message.type, state: validateState(message.state, roomId), serverTime: message.serverTime };
   }
   if (message.type === 'ack') {
     if (!hasOnlyKeys(message, ['type', 'opId', 'revision'], ['type', 'opId', 'revision']) ||
@@ -1072,7 +1074,7 @@ class RoomClient {
           if (this._candidateSocket === socket) this._candidateSocket = null;
           this._socket = socket;
           this._connected = true;
-          this._acceptState(message.state);
+          this._acceptState(message.state, message.serverTime);
           safeCallback(this._onStatus, { status: 'connected', endpoint });
           resolve(this.getState());
           return;
@@ -1109,7 +1111,7 @@ class RoomClient {
   }
 
   _handleServerMessage(message) {
-    if (message.type === 'state') return this._acceptState(message.state);
+    if (message.type === 'state') return this._acceptState(message.state, message.serverTime);
     if (message.type === 'ack') {
       const pending = this._pendingOperations.get(message.opId);
       if (!pending) return;
@@ -1132,10 +1134,14 @@ class RoomClient {
     safeClose(this._socket, 1002, 'unexpected message');
   }
 
-  _acceptState(state) {
+  _acceptState(state, serverTime = Date.now()) {
     if (this._state && state.revision < this._state.revision) return;
-    this._state = state;
-    safeCallback(this._onState, state);
+    const receivedAt = Date.now();
+    const rebased = jsonClone(state);
+    if (rebased.playback.playing) rebased.playback.position = currentPosition(rebased.playback, serverTime);
+    rebased.playback.changedAt = receivedAt;
+    this._state = rebased;
+    safeCallback(this._onState, rebased);
   }
 
   sendOperation(operation, options = {}) {

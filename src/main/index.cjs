@@ -1,6 +1,7 @@
 const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require('electron');
 const path = require('path');
 const { MediaController } = require('./media.cjs');
+const { MetadataController } = require('./metadata.cjs');
 const { RoomController } = require('./room-controller.cjs');
 const { Store, normalizeUrl } = require('./store.cjs');
 
@@ -9,6 +10,7 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 let barWindow;
 let store;
 let media;
+let metadata;
 let room;
 let currentHistoryId = null;
 let playerState = {
@@ -32,7 +34,10 @@ function updatePlayerState(patch) {
   const justEnded = Boolean(patch.ended) && !playerState.ended;
   playerState = { ...playerState, ...patch };
   send('player:state', playerState);
-  if (patch.title || patch.artist || patch.cover) store?.scheduleMetadataUpdate(currentHistoryId, playerState);
+  if (patch.title || patch.artist || patch.cover) {
+    store?.scheduleMetadataUpdate(currentHistoryId, playerState);
+    room?.updateCurrentMetadata(playerState);
+  }
   if (justEnded) room?.onEnded();
 }
 
@@ -62,6 +67,7 @@ function createBarWindow() {
     const roomSnapshot = room.getSnapshot();
     send('player:state', playerState);
     send('history:changed', store.listHistory());
+    send('playlists:changed', store.listPlaylists());
     send('room:status', roomSnapshot.status);
     send('room:state', roomSnapshot.state);
   });
@@ -103,6 +109,12 @@ function registerPlayerIpc() {
 
 function registerRoomIpc() {
   ipcMain.handle('room:create', () => room.create());
+  ipcMain.handle('room:create-from-playlist', (_event, playlistId) => {
+    const playlist = store.getPlaylist(String(playlistId || ''));
+    if (!playlist) return { ok: false, message: '歌单已经不存在' };
+    if (!playlist.items.length) return { ok: false, message: '请先向歌单添加网页' };
+    return room.create(playlist.items);
+  });
   ipcMain.handle('room:join', (_event, invite) => room.join(invite));
   ipcMain.handle('room:leave', () => room.leave());
   ipcMain.handle('room:get-state', () => room.getSnapshot());
@@ -116,8 +128,28 @@ function registerRoomIpc() {
 }
 
 function registerHistoryIpc() {
+  const offerMetadataLookup = async urls => {
+    if (!urls?.length) return false;
+    const answer = await dialog.showMessageBox(barWindow, {
+      type: 'question',
+      title: '是否自动读取网页名称？',
+      message: `已导入 ${urls.length} 个网页链接`,
+      detail: '读取名称会在独立、无登录状态的静音窗口中访问这些网页。你也可以只导入，不自动访问。',
+      buttons: ['读取名称', '只导入'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (answer.response !== 0) return false;
+    metadata.enqueueMany(urls);
+    return true;
+  };
   ipcMain.handle('history:list', () => store.listHistory());
-  ipcMain.handle('history:update', (_event, id, changes) => store.updateHistory(id, changes));
+  ipcMain.handle('history:update', async (_event, id, changes) => {
+    const result = await store.updateHistory(id, changes);
+    if (result.ok) metadata.enqueue(result.item.url);
+    return result;
+  });
   ipcMain.handle('history:delete', async (_event, id) => {
     if (currentHistoryId === id) currentHistoryId = null;
     return store.deleteHistory(id);
@@ -129,7 +161,11 @@ function registerHistoryIpc() {
       filters: [{ name: 'JSON 文件', extensions: ['json'] }],
     });
     if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
-    try { return { ok: true, count: await store.importHistory(result.filePaths[0]) }; }
+    try {
+      const imported = await store.importHistory(result.filePaths[0]);
+      const metadataStarted = await offerMetadataLookup(imported.urls);
+      return { ok: true, count: imported.count, metadataStarted };
+    }
     catch (error) { return { ok: false, message: `导入失败：${error.message}` }; }
   });
   ipcMain.handle('history:export', async () => {
@@ -140,6 +176,44 @@ function registerHistoryIpc() {
     });
     if (result.canceled || !result.filePath) return { ok: false, canceled: true };
     try { return { ok: true, count: await store.exportHistory(result.filePath) }; }
+    catch (error) { return { ok: false, message: `导出失败：${error.message}` }; }
+  });
+
+  ipcMain.handle('playlists:list', () => store.listPlaylists());
+  ipcMain.handle('playlists:create', (_event, name) => store.createPlaylist(name));
+  ipcMain.handle('playlists:rename', (_event, id, name) => store.renamePlaylist(id, name));
+  ipcMain.handle('playlists:delete', (_event, id) => store.deletePlaylist(id));
+  ipcMain.handle('playlists:add-history', (_event, playlistId, historyId) => store.addHistoryToPlaylist(playlistId, historyId));
+  ipcMain.handle('playlists:update-item', async (_event, playlistId, itemId, changes) => {
+    const result = await store.updatePlaylistItem(playlistId, itemId, changes);
+    if (result.ok) metadata.enqueue(result.item.url);
+    return result;
+  });
+  ipcMain.handle('playlists:remove-item', (_event, playlistId, itemId) => store.removePlaylistItem(playlistId, itemId));
+  ipcMain.handle('playlists:reorder-item', (_event, playlistId, itemId, index) => store.reorderPlaylistItem(playlistId, itemId, index));
+  ipcMain.handle('playlists:import', async () => {
+    const result = await dialog.showOpenDialog(barWindow, {
+      title: '导入声笺歌单',
+      properties: ['openFile'],
+      filters: [{ name: 'JSON 文件', extensions: ['json'] }],
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
+    try {
+      const imported = await store.importPlaylists(result.filePaths[0]);
+      const metadataStarted = await offerMetadataLookup(imported.urls);
+      return { ok: true, count: imported.count, metadataStarted };
+    } catch (error) { return { ok: false, message: `导入失败：${error.message}` }; }
+  });
+  ipcMain.handle('playlists:export', async (_event, playlistId) => {
+    const playlist = playlistId ? store.getPlaylist(String(playlistId)) : null;
+    const safeName = String(playlist?.name || 'all').replace(/[<>:"/\\|?*]/g, '-').slice(0, 60);
+    const result = await dialog.showSaveDialog(barWindow, {
+      title: playlist ? `导出歌单：${playlist.name}` : '导出全部声笺歌单',
+      defaultPath: `shengjian-playlist-${safeName}-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: 'JSON 文件', extensions: ['json'] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    try { return { ok: true, count: await store.exportPlaylists(result.filePath, playlistId || undefined) }; }
     catch (error) { return { ok: false, message: `导出失败：${error.message}` }; }
   });
 }
@@ -161,8 +235,13 @@ function registerWindowIpc() {
 }
 
 app.whenReady().then(async () => {
-  store = new Store(app.getPath('userData'), history => send('history:changed', history));
+  store = new Store(
+    app.getPath('userData'),
+    history => send('history:changed', history),
+    playlists => send('playlists:changed', playlists),
+  );
   await store.init();
+  metadata = new MetadataController({ onMetadata: (url, value) => store.applyMetadata(url, value) });
   media = new MediaController({
     onState: updatePlayerState,
     getOutputPreference: () => store.getOutputPreference(),
@@ -186,6 +265,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => {
   room?.dispose();
+  metadata?.dispose();
   media?.dispose();
   store?.dispose();
 });

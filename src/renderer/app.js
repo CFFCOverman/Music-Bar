@@ -22,8 +22,13 @@ let outputOpen = false;
 let roomOpen = false;
 let roomStatus = { mode: 'none', connected: false };
 let roomState = null;
+let historyItems = [];
+let playlists = [];
+let activePlaylistId = null;
+let playlistEditorMode = 'create';
 let pinned = true;
 let volumeFrame = null;
+let lastSeek = { value: -1, at: 0 };
 
 const format = value => {
   if (!Number.isFinite(value) || value < 0) return '0:00';
@@ -64,7 +69,7 @@ function syncPanels() {
   $('outputPanel').setAttribute('aria-hidden', String(!outputOpen));
   $('roomToggle').setAttribute('aria-expanded', String(roomOpen));
   $('roomPanel').setAttribute('aria-hidden', String(!roomOpen));
-  const height = roomOpen ? 520 : (outputOpen ? 370 : (historyOpen ? (inputOpen ? 490 : 430) : (inputOpen ? 154 : 92)));
+  const height = roomOpen ? 520 : (outputOpen ? 370 : (historyOpen ? 520 : (inputOpen ? 154 : 92)));
   window.musicBar.setHeight(height);
   if (inputOpen) setTimeout(() => urlInput.focus(), 120);
 }
@@ -85,6 +90,59 @@ async function loadUrl(value, collapseInput = true) {
   syncPanels();
 }
 
+function closePlaylistEditor() {
+  $('playlistEditor').hidden = true;
+  $('playlistName').value = '';
+}
+
+function openPlaylistEditor(mode = 'create') {
+  playlistEditorMode = mode;
+  const playlist = playlists.find(item => item.id === activePlaylistId);
+  $('playlistName').value = mode === 'rename' ? playlist?.name || '' : '';
+  $('playlistName').placeholder = mode === 'rename' ? '新的歌单名称' : '输入歌单名称';
+  $('playlistEditor').hidden = false;
+  setTimeout(() => $('playlistName').focus(), 20);
+}
+
+function playlistPicker(row, historyItem) {
+  if (!playlists.length) {
+    setMessage('先创建一个歌单', '创建后即可把历史网页加入歌单');
+    openPlaylistEditor('create');
+    return;
+  }
+  if (row.querySelector('.playlist-picker')) return;
+  row.classList.add('is-picking');
+  const form = document.createElement('form');
+  form.className = 'playlist-picker';
+  const select = document.createElement('select');
+  select.setAttribute('aria-label', '选择歌单');
+  for (const playlist of playlists) {
+    const option = document.createElement('option');
+    option.value = playlist.id;
+    option.textContent = `${playlist.name} · ${playlist.items.length}`;
+    select.append(option);
+  }
+  const save = Object.assign(document.createElement('button'), { type: 'submit', textContent: '加入', className: 'history-save' });
+  const cancel = Object.assign(document.createElement('button'), { type: 'button', textContent: '取消', className: 'history-cancel' });
+  form.append(select, save, cancel);
+  row.append(form);
+  cancel.addEventListener('click', () => { row.classList.remove('is-picking'); form.remove(); });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    save.disabled = true;
+    const result = await window.musicBar.playlists.addHistory(select.value, historyItem.id);
+    if (result.ok) {
+      setMessage('已加入歌单', playlists.find(item => item.id === select.value)?.name || '歌单');
+      row.classList.remove('is-picking');
+      form.remove();
+    } else {
+      save.disabled = false;
+      select.setCustomValidity(result.message || '加入失败');
+      select.reportValidity();
+    }
+  });
+}
+
 function historyItemView(item) {
   const row = document.createElement('article');
   row.className = 'history-item';
@@ -102,6 +160,11 @@ function historyItemView(item) {
 
   const actions = document.createElement('div');
   actions.className = 'history-actions';
+  const collect = document.createElement('button');
+  collect.type = 'button';
+  collect.className = 'history-playlist';
+  collect.textContent = '歌单';
+  collect.title = '加入歌单';
   const edit = document.createElement('button');
   edit.type = 'button';
   edit.className = 'history-edit';
@@ -110,8 +173,10 @@ function historyItemView(item) {
   remove.type = 'button';
   remove.className = 'history-delete';
   remove.textContent = '删除';
-  actions.append(edit, remove);
+  actions.append(collect, edit, remove);
   row.append(main, actions);
+
+  collect.addEventListener('click', () => playlistPicker(row, item));
 
   edit.addEventListener('click', () => {
     if (row.querySelector('.history-editor')) return;
@@ -165,8 +230,96 @@ function historyItemView(item) {
 }
 
 function renderHistory(items) {
-  historyList.replaceChildren(...items.map(historyItemView));
+  historyItems = Array.isArray(items) ? items : [];
+  renderLibrary();
+}
+
+function playlistItemView(item, index, playlist) {
+  const row = document.createElement('article');
+  row.className = 'history-item playlist-item';
+  const main = document.createElement('button');
+  main.type = 'button';
+  main.className = 'history-main';
+  const name = document.createElement('strong');
+  name.textContent = item.title || '未命名网页';
+  const detail = document.createElement('span');
+  detail.textContent = item.artist || item.url;
+  main.append(name, detail);
+  main.addEventListener('click', () => loadUrl(item.url, false));
+
+  const actions = document.createElement('div');
+  actions.className = 'history-actions';
+  const up = Object.assign(document.createElement('button'), { type: 'button', textContent: '↑', title: '上移', className: 'playlist-order' });
+  const down = Object.assign(document.createElement('button'), { type: 'button', textContent: '↓', title: '下移', className: 'playlist-order' });
+  const edit = Object.assign(document.createElement('button'), { type: 'button', textContent: '编辑', className: 'history-edit' });
+  const remove = Object.assign(document.createElement('button'), { type: 'button', textContent: '×', title: '从歌单移除', className: 'history-delete' });
+  up.disabled = index === 0;
+  down.disabled = index === playlist.items.length - 1;
+  up.addEventListener('click', () => window.musicBar.playlists.reorderItem(playlist.id, item.id, index - 1));
+  down.addEventListener('click', () => window.musicBar.playlists.reorderItem(playlist.id, item.id, index + 1));
+  remove.addEventListener('click', () => window.musicBar.playlists.removeItem(playlist.id, item.id));
+  actions.append(up, down, edit, remove);
+  row.append(main, actions);
+
+  edit.addEventListener('click', () => {
+    if (row.querySelector('.history-editor')) return;
+    row.classList.add('is-editing');
+    const editor = document.createElement('form');
+    editor.className = 'history-editor';
+    const titleInput = Object.assign(document.createElement('input'), { value: item.title || '', placeholder: '显示名称', maxLength: 300 });
+    const urlInput = Object.assign(document.createElement('input'), { value: item.url, placeholder: '网页链接' });
+    const save = Object.assign(document.createElement('button'), { type: 'submit', textContent: '保存', className: 'history-save' });
+    const cancel = Object.assign(document.createElement('button'), { type: 'button', textContent: '取消', className: 'history-cancel' });
+    editor.append(titleInput, urlInput, save, cancel);
+    row.append(editor);
+    titleInput.focus();
+    cancel.addEventListener('click', () => { row.classList.remove('is-editing'); editor.remove(); });
+    editor.addEventListener('submit', async event => {
+      event.preventDefault();
+      save.disabled = true;
+      const result = await window.musicBar.playlists.updateItem(playlist.id, item.id, { title: titleInput.value, url: urlInput.value });
+      if (!result.ok) {
+        save.disabled = false;
+        urlInput.setCustomValidity(result.message || '保存失败');
+        urlInput.reportValidity();
+      }
+    });
+  });
+  return row;
+}
+
+function renderPlaylists(items) {
+  playlists = Array.isArray(items) ? items : [];
+  if (activePlaylistId && !playlists.some(item => item.id === activePlaylistId)) activePlaylistId = null;
+  renderLibrary();
+}
+
+function renderLibrary() {
+  const active = playlists.find(item => item.id === activePlaylistId) || null;
+  $('historyTab').classList.toggle('active', !active);
+  $('playlistTabs').replaceChildren(...playlists.map(playlist => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.classList.toggle('active', playlist.id === active?.id);
+    button.textContent = `${playlist.name} · ${playlist.items.length}`;
+    button.title = playlist.name;
+    button.addEventListener('click', () => { activePlaylistId = playlist.id; closePlaylistEditor(); renderLibrary(); });
+    return button;
+  }));
+
+  $('renamePlaylist').hidden = !active;
+  $('sharePlaylist').hidden = !active;
+  $('deletePlaylist').hidden = !active;
+  $('importLibrary').textContent = active ? '导入歌单' : '导入历史';
+  $('exportLibrary').textContent = active ? '导出歌单' : '导出历史';
+  $('libraryViewStatus').textContent = active ? `${active.name} · ${active.items.length} 首` : `最近网页 · ${historyItems.length} 条`;
+  const items = active?.items || historyItems;
+  historyList.replaceChildren(...(active
+    ? items.map((item, index) => playlistItemView(item, index, active))
+    : items.map(historyItemView)));
   historyEmpty.hidden = items.length > 0;
+  $('libraryEmptyTitle').textContent = active ? '这个歌单还是空的' : '还没有播放记录';
+  $('libraryEmptyText').textContent = active ? '回到最近网页，点击“歌单”即可收藏' : '添加网页后会自动保存在这里';
 }
 
 function renderRoomStatus(next) {
@@ -176,7 +329,7 @@ function renderRoomStatus(next) {
   $('roomActive').hidden = !active;
   $('leaveRoom').hidden = !active;
   $('roomToggle').classList.toggle('connected', active && roomStatus.connected !== false);
-  $('roomRole').textContent = roomStatus.mode === 'host' ? '房主 · 互联网房间' : '受邀者 · 可编辑';
+  $('roomRole').textContent = roomStatus.mode === 'host' ? '房主 · 可编辑与拖动进度' : '受邀者 · 可编辑与拖动进度';
   $('roomPeer').textContent = roomStatus.message || (roomStatus.mode === 'host'
     ? (roomStatus.peerConnected ? '朋友已连接' : '等待朋友加入')
     : (roomStatus.connected ? '已连接房主' : '连接已断开'));
@@ -298,10 +451,12 @@ async function refreshOutputs() {
 
 window.musicBar.onState(render);
 window.musicBar.history.onChanged(renderHistory);
+window.musicBar.playlists.onChanged(renderPlaylists);
 window.musicBar.room.onState(renderRoomState);
 window.musicBar.room.onStatus(renderRoomStatus);
 window.musicBar.requestState();
 window.musicBar.history.list().then(renderHistory);
+window.musicBar.playlists.list().then(renderPlaylists);
 window.musicBar.room.getState().then(result => {
   if (result?.status) renderRoomStatus(result.status);
   if (result?.state) renderRoomState(result.state);
@@ -315,8 +470,19 @@ play.addEventListener('click', () => {
   window.musicBar.toggle();
 });
 document.querySelectorAll('[data-skip]').forEach(button => button.addEventListener('click', () => window.musicBar.skip(Number(button.dataset.skip))));
+function commitSeek() {
+  const target = (state.duration || 0) * Number(progress.value) / 1000;
+  const now = Date.now();
+  seeking = false;
+  if (!state.duration || Math.abs(target - lastSeek.value) < .05 && now - lastSeek.at < 350) return;
+  lastSeek = { value: target, at: now };
+  window.musicBar.seek(target);
+}
+progress.addEventListener('pointerdown', () => { seeking = true; });
 progress.addEventListener('input', () => { seeking = true; elapsed.textContent = format((state.duration || 0) * Number(progress.value) / 1000); });
-progress.addEventListener('change', () => { window.musicBar.seek((state.duration || 0) * Number(progress.value) / 1000); seeking = false; });
+progress.addEventListener('change', commitSeek);
+progress.addEventListener('pointerup', commitSeek);
+progress.addEventListener('pointercancel', () => { seeking = false; });
 volume.addEventListener('input', () => {
   cancelAnimationFrame(volumeFrame);
   volumeFrame = requestAnimationFrame(() => window.musicBar.volume(volume.value));
@@ -392,20 +558,95 @@ $('pin').addEventListener('click', () => {
 $('min').addEventListener('click', () => window.musicBar.minimize());
 $('close').addEventListener('click', () => window.musicBar.close());
 $('source').addEventListener('click', () => window.musicBar.openSource());
-$('importHistory').addEventListener('click', async () => {
+
+async function importPlaylists() {
+  const result = await window.musicBar.playlists.import();
+  if (result.ok) setMessage('歌单导入完成', result.metadataStarted
+    ? `已导入 ${result.count} 个歌单，正在安全读取网页名称`
+    : `已导入 ${result.count} 个歌单，未访问其中的网页`);
+  else if (!result.canceled) setMessage('导入失败', result.message);
+}
+
+$('historyTab').addEventListener('click', () => { activePlaylistId = null; closePlaylistEditor(); renderLibrary(); });
+$('newPlaylist').addEventListener('click', () => openPlaylistEditor('create'));
+$('cancelPlaylistEditor').addEventListener('click', closePlaylistEditor);
+$('playlistEditor').addEventListener('submit', async event => {
+  event.preventDefault();
+  const input = $('playlistName');
+  const button = $('playlistEditor').querySelector('.save');
+  if (!input.value.trim() || button.disabled) return;
+  button.disabled = true;
+  const result = playlistEditorMode === 'rename'
+    ? await window.musicBar.playlists.rename(activePlaylistId, input.value)
+    : await window.musicBar.playlists.create(input.value);
+  button.disabled = false;
+  if (!result.ok) {
+    input.setCustomValidity(result.message || '保存失败');
+    input.reportValidity();
+    return;
+  }
+  if (playlistEditorMode === 'create') activePlaylistId = result.playlist.id;
+  closePlaylistEditor();
+  renderLibrary();
+});
+$('renamePlaylist').addEventListener('click', () => openPlaylistEditor('rename'));
+$('importPlaylistsTop').addEventListener('click', importPlaylists);
+$('importLibrary').addEventListener('click', async () => {
+  if (activePlaylistId) return importPlaylists();
   const result = await window.musicBar.history.import();
-  if (result.ok) setMessage('导入完成', `已导入或更新 ${result.count} 条记录`);
+  if (result.ok) setMessage('历史导入完成', result.metadataStarted
+    ? `已导入或更新 ${result.count} 条记录，正在安全读取网页名称`
+    : `已导入或更新 ${result.count} 条记录，未访问其中的网页`);
   else if (!result.canceled) setMessage('导入失败', result.message);
 });
-$('exportHistory').addEventListener('click', async () => {
-  const result = await window.musicBar.history.export();
-  if (result.ok) setMessage('导出完成', `已导出 ${result.count} 条记录`);
+$('exportLibrary').addEventListener('click', async () => {
+  const result = activePlaylistId
+    ? await window.musicBar.playlists.export(activePlaylistId)
+    : await window.musicBar.history.export();
+  if (result.ok) setMessage('导出完成', activePlaylistId ? '歌单名称、网页信息与顺序均已保存' : `已导出 ${result.count} 条记录`);
   else if (!result.canceled) setMessage('导出失败', result.message);
+});
+$('sharePlaylist').addEventListener('click', async () => {
+  const playlist = playlists.find(item => item.id === activePlaylistId);
+  if (!playlist || !playlist.items.length) {
+    setMessage('歌单还是空的', '请先从最近网页加入内容');
+    return;
+  }
+  const button = $('sharePlaylist');
+  button.disabled = true;
+  setMessage('正在分享歌单…', '本机将创建加密互联网房间');
+  const result = await window.musicBar.room.createFromPlaylist(playlist.id);
+  button.disabled = false;
+  if (!result.ok) {
+    setMessage('分享失败', result.message || '请重试');
+    return;
+  }
+  historyOpen = false;
+  roomOpen = true;
+  syncPanels();
+  setMessage('歌单已进入一起听', '复制邀请发给朋友即可');
+});
+let deletePlaylistTimer;
+$('deletePlaylist').addEventListener('click', async () => {
+  const button = $('deletePlaylist');
+  if (!button.classList.contains('confirm')) {
+    button.classList.add('confirm');
+    button.textContent = '确认删除';
+    clearTimeout(deletePlaylistTimer);
+    deletePlaylistTimer = setTimeout(() => { button.classList.remove('confirm'); button.textContent = '删除'; }, 2600);
+    return;
+  }
+  button.disabled = true;
+  const result = await window.musicBar.playlists.delete(activePlaylistId);
+  button.disabled = false;
+  button.classList.remove('confirm');
+  button.textContent = '删除';
+  if (!result.ok) setMessage('删除失败', result.message || '请重试');
 });
 
 $('form').addEventListener('submit', event => { event.preventDefault(); loadUrl(urlInput.value); });
 document.addEventListener('keydown', event => {
-  if (event.target.matches('input, textarea')) return;
+  if (event.target.matches('input, textarea, select, button')) return;
   if (event.code === 'Space') { event.preventDefault(); play.click(); }
   if (event.code === 'ArrowLeft') window.musicBar.skip(-10);
   if (event.code === 'ArrowRight') window.musicBar.skip(10);

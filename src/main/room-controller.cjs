@@ -1,6 +1,6 @@
 const { randomBytes } = require('crypto');
 const { RoomClient, RoomHost } = require('./room.cjs');
-const { normalizeUrl } = require('./store.cjs');
+const { isAutomaticTitle, normalizeUrl } = require('./store.cjs');
 const { InternetTunnel } = require('./tunnel.cjs');
 
 const emptyStatus = () => ({ mode: 'none', connected: false, peerConnected: false, invite: '', message: '' });
@@ -23,6 +23,8 @@ class RoomController {
     this.lastPlaybackSignature = '';
     this.syncRunning = false;
     this.syncPending = false;
+    this.lastMetadataSignature = '';
+    this.loadRetryTimer = null;
   }
 
   get active() { return Boolean(this.session); }
@@ -91,15 +93,26 @@ class RoomController {
 
         const trackKey = `${track.id}|${track.url}`;
         if (trackKey !== this.loadedTrackKey) {
-          this.loadedTrackKey = trackKey;
           try {
             const item = await this.store.upsertHistory(track.url, {
               title: this.cleanTitle(track.title, this.defaultTitle(track.url)),
             });
             this.setCurrentHistoryId(item?.id || null);
             if (this.media.getCurrentUrl() !== track.url) await this.media.load(track.url);
+            this.loadedTrackKey = trackKey;
+            clearTimeout(this.loadRetryTimer);
+            this.loadRetryTimer = null;
           } catch (error) {
-            if (this.state === snapshot) this.setPlayerMessage({ ready: false, title: '网页加载失败', artist: error.message });
+            this.loadedTrackKey = '';
+            if (this.state === snapshot) {
+              this.setPlayerMessage({ ready: false, title: '网页加载失败', artist: error.message });
+              clearTimeout(this.loadRetryTimer);
+              this.loadRetryTimer = setTimeout(() => {
+                this.loadRetryTimer = null;
+                if (this.state === snapshot) void this.synchronizeMedia();
+              }, 2000);
+            }
+            continue;
           }
         }
 
@@ -149,7 +162,25 @@ class RoomController {
     if (event?.status === 'error') this.publishStatus({ connected: false, message: event.message || '互联网连接失败' });
   }
 
-  makeInitialState() {
+  makeInitialState(seedItems) {
+    if (Array.isArray(seedItems) && seedItems.length) {
+      const playlist = seedItems.slice(0, 200).map(item => {
+        const url = normalizeUrl(item?.url);
+        if (!url) return null;
+        return {
+          id: randomBytes(12).toString('base64url'),
+          title: this.cleanTitle(item?.title, this.defaultTitle(url)),
+          url,
+        };
+      }).filter(Boolean);
+      if (playlist.length) {
+        return {
+          playlist,
+          selectedId: playlist[0].id,
+          playback: { playing: false, position: 0, changedAt: Date.now() },
+        };
+      }
+    }
     const url = normalizeUrl(this.media.getCurrentUrl());
     if (!url) return undefined;
     const player = this.getPlayerState();
@@ -165,20 +196,20 @@ class RoomController {
     };
   }
 
-  async create() {
+  async create(seedItems) {
     await this.leave();
     this.mode = 'host';
     this.status = { mode: 'host', connected: false, peerConnected: false, invite: '', message: '正在启动本机服务器…' };
     let session;
-    session = new RoomHost({
-      host: '127.0.0.1',
-      initialState: this.makeInitialState(),
-      onState: state => this.acceptState(session, state),
-      onStatus: event => this.handleHostStatus(session, event),
-    });
-    this.session = session;
-    this.publishStatus();
     try {
+      session = new RoomHost({
+        host: '127.0.0.1',
+        initialState: this.makeInitialState(seedItems),
+        onState: state => this.acceptState(session, state),
+        onStatus: event => this.handleHostStatus(session, event),
+      });
+      this.session = session;
+      this.publishStatus();
       const result = await session.start();
       if (this.session !== session) throw new Error('房间创建已取消');
       this.publishStatus({ connected: false, peerConnected: false, message: '正在建立加密互联网连接…' });
@@ -192,8 +223,11 @@ class RoomController {
       this.acceptState(session, session.getState());
       return { ok: true, invite: this.invite };
     } catch (error) {
-      if (this.session === session) await this.leave();
-      return { ok: false, message: error.message };
+      if (!session || this.session === session) await this.leave();
+      const message = /安全消息上限|state.*large/i.test(error.message)
+        ? '这个歌单内容过多，暂时无法完整共享；请减少条目或缩短名称后重试'
+        : error.message;
+      return { ok: false, message };
     }
   }
 
@@ -237,6 +271,10 @@ class RoomController {
     this.loadedTrackKey = '';
     this.lastPlaybackSignature = '';
     this.syncPending = false;
+    this.lastMetadataSignature = '';
+    clearTimeout(this.loadRetryTimer);
+    this.loadRetryTimer = null;
+    this.media.cancelSyncPlayback?.();
     this.status = emptyStatus();
     this.send('room:state', null);
     this.send('room:status', this.status);
@@ -309,6 +347,20 @@ class RoomController {
     }).catch(error => this.reportError(error));
   }
 
+  updateCurrentMetadata(playerState) {
+    const track = this.state?.playlist?.find(item => item.id === this.state.selectedId);
+    const title = this.cleanTitle(playerState?.title, '');
+    if (!this.session || !track || !title || ['正在打开网页…', '网页音频'].includes(title)) return;
+    if (!isAutomaticTitle(track.title, track.url) || track.title === title) return;
+    const signature = `${track.id}|${title}`;
+    if (signature === this.lastMetadataSignature) return;
+    this.lastMetadataSignature = signature;
+    this.apply({ type: 'playlist.update', itemId: track.id, title }).catch(error => {
+      this.lastMetadataSignature = '';
+      this.reportError(error);
+    });
+  }
+
   onEnded() {
     if (this.mode === 'host' && this.session && this.state?.selectedId) {
       this.apply({ type: 'next' }).catch(error => this.reportError(error));
@@ -320,6 +372,8 @@ class RoomController {
     const tunnel = this.tunnel;
     this.session = null;
     this.tunnel = null;
+    clearTimeout(this.loadRetryTimer);
+    this.media.cancelSyncPlayback?.();
     try { Promise.resolve(session?.close()).catch(() => {}); } catch {}
     try { Promise.resolve(tunnel?.close()).catch(() => {}); } catch {}
   }

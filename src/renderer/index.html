@@ -115,27 +115,47 @@
           <span id="roomNowPlaying">歌单暂时为空</span>
           <button id="roomNext" type="button">下一首 →</button>
         </div>
+        <small class="room-sync-note">双方都可以拖动顶部进度条，松手后立即同步。</small>
         <div class="room-playlist" id="roomPlaylist"></div>
         <div class="room-empty" id="roomEmpty"><strong>共同歌单为空</strong><span>双方都可以添加、编辑、排序和删除</span></div>
       </div>
     </aside>
 
-    <aside class="history-panel" id="historyPanel" aria-label="播放历史" aria-hidden="true">
+    <aside class="history-panel" id="historyPanel" aria-label="历史与歌单" aria-hidden="true">
       <header class="history-header">
         <div>
-          <strong>播放历史</strong>
-          <span>保存过的网页与音频</span>
+          <strong>历史与歌单</strong>
+          <span>导入网页后会在后台自动识别视频名称</span>
         </div>
         <div class="history-tools">
-          <button id="importHistory" type="button">导入</button>
-          <button id="exportHistory" type="button">导出</button>
+          <button id="importPlaylistsTop" type="button">导入歌单</button>
+          <button id="newPlaylist" type="button">＋ 新歌单</button>
         </div>
       </header>
+      <nav class="library-tabs" aria-label="历史与歌单视图">
+        <button class="active" id="historyTab" type="button">最近网页</button>
+        <div id="playlistTabs"></div>
+      </nav>
+      <form class="playlist-editor" id="playlistEditor" hidden>
+        <input id="playlistName" maxlength="80" autocomplete="off" placeholder="输入歌单名称">
+        <button class="save" type="submit">保存</button>
+        <button id="cancelPlaylistEditor" type="button">取消</button>
+      </form>
+      <div class="library-toolbar">
+        <span id="libraryViewStatus">全部历史记录</span>
+        <div>
+          <button id="importLibrary" type="button">导入历史</button>
+          <button id="exportLibrary" type="button">导出历史</button>
+          <button id="renamePlaylist" type="button" hidden>改名</button>
+          <button id="sharePlaylist" class="accent" type="button" hidden>一起听</button>
+          <button id="deletePlaylist" class="danger" type="button" hidden>删除</button>
+        </div>
+      </div>
       <div class="history-list" id="historyList"></div>
       <div class="history-empty" id="historyEmpty">
         <span aria-hidden="true">♫</span>
-        <strong>还没有播放记录</strong>
-        <small>添加网页后会自动保存在这里</small>
+        <strong id="libraryEmptyTitle">还没有播放记录</strong>
+        <small id="libraryEmptyText">添加网页后会自动保存在这里</small>
       </div>
     </aside>
   </main>
