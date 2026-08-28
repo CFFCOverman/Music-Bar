@@ -1,0 +1,25 @@
+name: Shengjian
+options:
+  bundleIdPrefix: com.shengjian
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  Shengjian:
+    type: application
+    platform: iOS
+    sources: [Shengjian]
+    info:
+      path: Shengjian/Info.plist
+      properties:
+        CFBundleDisplayName: "声笺"
+        LSApplicationCategoryType: public.app-category.music
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Editor
+            CFBundleURLName: com.shengjian.musicbar.join
+            CFBundleURLSchemes: [shengjian]
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shengjian.musicbar.ios
+        PRODUCT_NAME: "声笺"
+        SWIFT_VERSION: 5.10

@@ -6,10 +6,20 @@ const path = require('path');
 const { CLOUDFLARED_SHA256 } = require('../src/main/tunnel.cjs');
 
 const VERSION = '2026.7.3';
-const ASSET_URL = `https://github.com/cloudflare/cloudflared/releases/download/${VERSION}/cloudflared-windows-amd64.exe`;
 const vendorDirectory = path.join(__dirname, '..', 'vendor');
-const destination = path.join(vendorDirectory, 'cloudflared.exe');
-const temporary = `${destination}.download-${process.pid}`;
+const assets = {
+  'win32-x64': { name: 'cloudflared-windows-amd64.exe', destination: 'cloudflared.exe', archive: false },
+  'darwin-x64': { name: 'cloudflared-darwin-amd64.tgz', destination: 'cloudflared-x64', archive: true },
+  'darwin-arm64': { name: 'cloudflared-darwin-arm64.tgz', destination: 'cloudflared-arm64', archive: true },
+};
+
+function requestedPlatformKey(argv = process.argv.slice(2)) {
+  const platformIndex = argv.indexOf('--platform');
+  const archIndex = argv.indexOf('--arch');
+  const platform = platformIndex >= 0 ? argv[platformIndex + 1] : process.platform;
+  const arch = archIndex >= 0 ? argv[archIndex + 1] : process.arch;
+  return `${platform}-${arch}`;
+}
 
 function hashFile(file) {
   return new Promise((resolve, reject) => {
@@ -68,18 +78,22 @@ function download(url, file, redirects = 5) {
   });
 }
 
-(async () => {
-  if (process.platform !== 'win32' || process.arch !== 'x64') {
-    console.log('cloudflared: 非 Windows x64 环境，跳过桌面隧道组件。');
-    return;
+async function install(platformKey = requestedPlatformKey()) {
+  const asset = assets[platformKey];
+  if (!asset) {
+    throw new Error(`cloudflared: 不支持 ${platformKey}`);
   }
+  const assetUrl = `https://github.com/cloudflare/cloudflared/releases/download/${VERSION}/${asset.name}`;
+  const destination = path.join(vendorDirectory, asset.destination);
+  const temporary = `${destination}.download-${process.pid}`;
   if (process.env.MUSIC_BAR_SKIP_TUNNEL_DOWNLOAD === '1') {
     console.log('cloudflared: 已按环境变量跳过下载。');
     return;
   }
   await fs.promises.mkdir(vendorDirectory, { recursive: true });
   try {
-    if (await hashFile(destination) === CLOUDFLARED_SHA256 && verifySignature(destination)) {
+    const hashValid = await hashFile(destination) === CLOUDFLARED_SHA256[platformKey];
+    if (hashValid && (process.platform !== 'win32' || verifySignature(destination))) {
       console.log(`cloudflared ${VERSION}: 已安装并通过安全校验。`);
       return;
     }
@@ -88,18 +102,33 @@ function download(url, file, redirects = 5) {
   await fs.promises.rm(temporary, { force: true });
   console.log(`cloudflared ${VERSION}: 正在从 Cloudflare 官方仓库下载…`);
   try {
-    await download(ASSET_URL, temporary);
-    const actual = await hashFile(temporary);
-    if (actual !== CLOUDFLARED_SHA256) throw new Error(`SHA-256 校验失败：${actual}`);
-    if (!verifySignature(temporary)) throw new Error('Cloudflare Authenticode 数字签名校验失败');
+    await download(assetUrl, temporary);
+    let installedFile = temporary;
+    if (asset.archive) {
+      const archive = `${temporary}.tgz`;
+      await fs.promises.rename(temporary, archive);
+      const extraction = spawnSync('tar', ['-xzf', archive, '-C', vendorDirectory], { encoding: 'utf8' });
+      await fs.promises.rm(archive, { force: true });
+      if (extraction.status !== 0) throw new Error(`cloudflared 解压失败：${String(extraction.stderr || '').trim()}`);
+      installedFile = path.join(vendorDirectory, 'cloudflared');
+    }
+    const actual = await hashFile(installedFile);
+    if (actual !== CLOUDFLARED_SHA256[platformKey]) throw new Error(`SHA-256 校验失败：${actual}`);
+    if (process.platform === 'win32' && !verifySignature(installedFile)) throw new Error('Cloudflare Authenticode 数字签名校验失败');
     await fs.promises.rm(destination, { force: true });
-    await fs.promises.rename(temporary, destination);
+    await fs.promises.rename(installedFile, destination);
+    if (process.platform === 'darwin') await fs.promises.chmod(destination, 0o755);
     console.log(`cloudflared ${VERSION}: 安装完成。`);
   } catch (error) {
     await fs.promises.rm(temporary, { force: true });
+    if (asset.archive) await fs.promises.rm(path.join(vendorDirectory, 'cloudflared'), { force: true });
     throw error;
   }
-})().catch(error => {
+}
+
+if (require.main === module) install().catch(error => {
   console.error(`cloudflared 安装失败：${error.message}`);
   process.exitCode = 1;
 });
+
+module.exports = { assets, install, requestedPlatformKey };

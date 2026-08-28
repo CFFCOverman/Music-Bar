@@ -4,6 +4,7 @@ const { MediaController } = require('./media.cjs');
 const { MetadataController } = require('./metadata.cjs');
 const { RoomController } = require('./room-controller.cjs');
 const { Store, normalizeUrl } = require('./store.cjs');
+const { CUSTOM_SCHEME, findJoinInput } = require('./invite-link.cjs');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
@@ -13,6 +14,7 @@ let media;
 let metadata;
 let room;
 let currentHistoryId = null;
+let pendingJoinInvite = findJoinInput(process.argv);
 let playerState = {
   ready: false,
   playing: false,
@@ -70,9 +72,43 @@ function createBarWindow() {
     send('playlists:changed', store.listPlaylists());
     send('room:status', roomSnapshot.status);
     send('room:state', roomSnapshot.state);
+    if (pendingJoinInvite) {
+      const invite = pendingJoinInvite;
+      pendingJoinInvite = '';
+      room.join(invite);
+    }
   });
   barWindow.on('closed', () => { barWindow = null; });
 }
+
+function acceptJoinLink(value) {
+  const invite = findJoinInput([value]);
+  if (!invite) return false;
+  if (!room) pendingJoinInvite = invite;
+  else room.join(invite);
+  if (barWindow) {
+    if (barWindow.isMinimized()) barWindow.restore();
+    barWindow.show();
+    barWindow.focus();
+  }
+  return true;
+}
+
+if (process.defaultApp) app.setAsDefaultProtocolClient(CUSTOM_SCHEME.slice(0, -1), process.execPath, [path.resolve(process.argv[1])]);
+else app.setAsDefaultProtocolClient(CUSTOM_SCHEME.slice(0, -1));
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
+else app.on('second-instance', (_event, argv) => {
+  const invite = findJoinInput(argv);
+  if (invite) acceptJoinLink(invite);
+  else if (barWindow) { barWindow.show(); barWindow.focus(); }
+});
+
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  acceptJoinLink(url);
+});
 
 function registerPlayerIpc() {
   ipcMain.handle('player:load', async (_event, raw) => {

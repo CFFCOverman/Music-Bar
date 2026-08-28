@@ -4,12 +4,18 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 
-const CLOUDFLARED_SHA256 = '8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841';
+const CLOUDFLARED_SHA256 = Object.freeze({
+  'win32-x64': '8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841',
+  'darwin-x64': 'e88fe5874d42a94f49a7ea59cabc3722d2962d0449232b0f3b1a426a712e275c',
+  'darwin-arm64': 'f35c50089cd25f77a4cb5a2152036bc26db15aa31fbe11f7995d2e42a4ed6257',
+});
 const PUBLIC_URL_PATTERN = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 
 function defaultExecutablePath() {
-  if (process.resourcesPath && !process.defaultApp) return path.join(process.resourcesPath, 'cloudflared.exe');
-  return path.join(__dirname, '..', '..', 'vendor', 'cloudflared.exe');
+  const filename = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
+  if (process.resourcesPath && !process.defaultApp) return path.join(process.resourcesPath, filename);
+  const developmentName = process.platform === 'win32' ? filename : `cloudflared-${process.arch}`;
+  return path.join(__dirname, '..', '..', 'vendor', developmentName);
 }
 
 function fileSha256(file) {
@@ -66,7 +72,8 @@ class InternetTunnel {
     catch { throw new Error('缺少互联网隧道组件，请重新安装应用'); }
     if (!stats.isFile() || stats.size < 10 * 1024 * 1024) throw new Error('互联网隧道组件无效');
     const actual = await fileSha256(this.executablePath);
-    if (actual !== CLOUDFLARED_SHA256) throw new Error('互联网隧道组件安全校验失败');
+    const expected = CLOUDFLARED_SHA256[`${process.platform}-${process.arch}`];
+    if (!expected || actual !== expected) throw new Error('互联网隧道组件安全校验失败');
   }
 
   async start(port) {
@@ -86,7 +93,7 @@ class InternetTunnel {
 
     const child = spawn(this.executablePath, [
       'tunnel',
-      '--config', 'NUL',
+      '--config', process.platform === 'win32' ? 'NUL' : '/dev/null',
       '--no-autoupdate',
       '--url', `http://127.0.0.1:${port}`,
       '--loglevel', 'info',

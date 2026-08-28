@@ -1,4 +1,5 @@
 const { randomBytes } = require('crypto');
+const { createJoinLink, extractInvite } = require('./invite-link.cjs');
 const { RoomClient, RoomHost } = require('./room.cjs');
 const { isAutomaticTitle, normalizeUrl } = require('./store.cjs');
 const { InternetTunnel } = require('./tunnel.cjs');
@@ -218,7 +219,7 @@ class RoomController {
       this.tunnel = tunnel;
       const internet = await tunnel.start(result.port);
       if (this.session !== session || this.tunnel !== tunnel) throw new Error('房间创建已取消');
-      this.invite = session.createInvite([internet.endpoint]);
+      this.invite = createJoinLink(session.createInvite([internet.endpoint]));
       this.publishStatus({ connected: true, peerConnected: false, message: '等待朋友通过互联网加入' });
       this.acceptState(session, session.getState());
       return { ok: true, invite: this.invite };
@@ -238,7 +239,7 @@ class RoomController {
     let session;
     try {
       session = new RoomClient({
-        invite: String(invite || '').trim(),
+        invite: extractInvite(invite),
         endpointTimeoutMs: 10000,
         onState: state => this.acceptState(session, state),
         onStatus: event => this.handleGuestStatus(session, event),

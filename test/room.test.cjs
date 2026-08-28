@@ -4,6 +4,7 @@ const test = require('node:test');
 const { MediaController } = require('../src/main/media.cjs');
 const { RoomController } = require('../src/main/room-controller.cjs');
 const { RoomClient, RoomHost, createInvite, parseInvite } = require('../src/main/room.cjs');
+const { createJoinLink, extractInvite, findJoinInput } = require('../src/main/invite-link.cjs');
 
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const waitFor = async predicate => {
@@ -13,6 +14,20 @@ const waitFor = async predicate => {
   }
   throw new Error('等待房间状态同步超时');
 };
+
+test('新老邀请格式可在各端互通，且密钥位于 URL 片段', () => {
+  const invite = createInvite({
+    endpoints: ['wss://example.com/'],
+    roomId: 'cross_device_room_1',
+    token: randomBytes(32).toString('base64url'),
+  });
+  const link = createJoinLink(invite);
+  assert.match(link, /^shengjian:\/\/join#MB1\./);
+  assert.equal(extractInvite(link), invite);
+  assert.equal(extractInvite(`https://listen.example.com/join#${invite}`), invite);
+  assert.equal(findJoinInput(['--flag', link]), invite);
+  assert.throws(() => extractInvite('https://listen.example.com/other#MB1.bad'), /不是有效/);
+});
 
 test('房主和受邀者可共同编辑并同步播放状态', async () => {
   const host = new RoomHost({ host: '127.0.0.1' });

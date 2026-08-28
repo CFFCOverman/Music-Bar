@@ -3,6 +3,7 @@ const path = require('path');
 
 const files = [
   'src/main/index.cjs',
+  'src/main/invite-link.cjs',
   'src/main/media.cjs',
   'src/main/metadata.cjs',
   'src/main/room-controller.cjs',
@@ -13,6 +14,7 @@ const files = [
   'src/renderer/app.js',
   'scripts/setup-cloudflared.cjs',
   'test/store.test.cjs',
+  'test/environment.test.cjs',
 ];
 
 for (const file of files) {

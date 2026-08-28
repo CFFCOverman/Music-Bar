@@ -11,10 +11,12 @@
   "scripts": {
     "postinstall": "node scripts/setup-cloudflared.cjs",
     "setup:tunnel": "node scripts/setup-cloudflared.cjs",
+    "setup:tunnel:mac": "node scripts/setup-cloudflared.cjs --platform darwin --arch x64 && node scripts/setup-cloudflared.cjs --platform darwin --arch arm64",
     "check": "node scripts/check.cjs",
-    "test": "node --test --test-isolation=none test/room.test.cjs test/store.test.cjs test/tunnel-binary.test.cjs",
+    "test": "node --test --test-isolation=none test/environment.test.cjs test/room.test.cjs test/store.test.cjs test/tunnel-binary.test.cjs",
     "desktop": "electron src/main/index.cjs",
-    "desktop:pack": "electron-builder --win portable"
+    "desktop:pack": "electron-builder --win portable",
+    "desktop:pack:mac": "npm run setup:tunnel:mac && electron-builder --mac dmg zip --x64 --arm64"
   },
   "dependencies": {
     "ws": "^8.21.3"
@@ -39,21 +41,16 @@
       "src/**/*",
       "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "vendor/cloudflared.exe",
-        "to": "cloudflared.exe"
-      },
-      {
-        "from": "vendor/cloudflared-LICENSE.txt",
-        "to": "cloudflared-LICENSE.txt"
-      },
-      {
-        "from": "vendor/NOTICE.md",
-        "to": "cloudflared-NOTICE.md"
-      }
-    ],
+    "protocols": [{
+      "name": "声笺共听链接",
+      "schemes": ["shengjian"]
+    }],
     "win": {
+      "extraResources": [
+        { "from": "vendor/cloudflared.exe", "to": "cloudflared.exe" },
+        { "from": "vendor/cloudflared-LICENSE.txt", "to": "cloudflared-LICENSE.txt" },
+        { "from": "vendor/NOTICE.md", "to": "cloudflared-NOTICE.md" }
+      ],
       "target": [
         {
           "target": "portable",
@@ -63,6 +60,16 @@
         }
       ],
       "artifactName": "Shengjian-Music-Bar-${version}.exe"
+    },
+    "mac": {
+      "category": "public.app-category.music",
+      "target": ["dmg", "zip"],
+      "artifactName": "Shengjian-Music-Bar-${version}-${arch}.${ext}",
+      "extraResources": [
+        { "from": "vendor/cloudflared-${arch}", "to": "cloudflared" },
+        { "from": "vendor/cloudflared-LICENSE.txt", "to": "cloudflared-LICENSE.txt" },
+        { "from": "vendor/NOTICE.md", "to": "cloudflared-NOTICE.md" }
+      ]
     }
   }
 }
